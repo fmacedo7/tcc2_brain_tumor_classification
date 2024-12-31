@@ -19,20 +19,22 @@ import itertools
 
 # import data handling tools
 import cv2
+import matplotlib
 import numpy as np
+from lime import lime_image
 import pandas as pd
 import seaborn as sns
 sns.set_style('darkgrid')
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics import confusion_matrix, classification_report, f1_score, precision_score, recall_score
 
 # import Deep learning Libraries
 import tensorflow as tf
 from tensorflow import keras
 # gpus = tf.config.experimental.list_physical_devices('GPU')
 # tf.config.experimental.set_memory_growth(gpus[0], True)
-from keras.models import Sequential
+from keras.models import Sequential, Model
 from keras.optimizers import Adam, Adamax
 from keras.losses import categorical_crossentropy
 from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Activation, Dropout
@@ -41,29 +43,18 @@ from keras.layers.normalization.batch_normalization import (
 )
 from keras.callbacks import ReduceLROnPlateau
 from keras.preprocessing.image import ImageDataGenerator
-from keras import regularizers
 from keras.regularizers import l1, l2
+from keras.utils import img_to_array, load_img
+from tf_keras_vis.gradcam import Gradcam
+from tf_keras_vis.utils import normalize
+from tf_keras_vis.utils.scores import CategoricalScore
+from tf_keras_vis.utils.model_modifiers import ReplaceToLinear
+
 # Ignore Warnings
 import warnings
 warnings.filterwarnings("ignore")
 
 print ('modules loaded')
-
-# def limitgpu(maxmem):
-# 	gpus = tf.config.list_physical_devices('GPU')
-# 	if gpus:
-# 		# Restrict TensorFlow to only allocate a fraction of GPU memory
-# 		try:
-# 			for gpu in gpus:
-# 				tf.config.experimental.set_virtual_device_configuration(gpu,
-# 						[tf.config.experimental.VirtualDeviceConfiguration(memory_limit=maxmem)])
-# 		except RuntimeError as e:
-# 			# Virtual devices must be set before GPUs have been initialized
-# 			print(e)
-
-
-# # 3.5 gigaaaaaaaaaaaaaasssss
-# limitgpu(3072+512) 
 
 #---------Create a dataframe from dataset----------#
 
@@ -197,7 +188,8 @@ def show_images_with_labels(generator, num_images=25):
         plt.title(f"Label: {predicted_label}")
         plt.axis('off')
     plt.tight_layout()
-    plt.show()
+    plt.savefig("output_image.png")
+    plt.close()
 
 show_images_with_labels(train_generator)
 '''
@@ -419,6 +411,110 @@ history = model.fit(
     shuffle=False
 )
 
+def find_penultimate_layer(model):
+    """
+    Retorna o nome da última camada convolucional no modelo.
+    """
+    for layer in reversed(model.layers):
+        if 'conv' in layer.name or 'Conv2D' in str(layer):
+            print(f"Penultimate Conv Layer: {layer.name}")
+            return layer.name
+    raise ValueError("Nenhuma camada convolucional encontrada no modelo base.")
+
+def create_submodel_for_gradcam(full_model, target_layer_name):
+    """
+    Cria um submodelo funcional conectando as entradas da Xception à camada convolucional alvo.
+    """
+    # Acessa o base_model (Xception)
+    base_model = full_model.layers[0]  
+
+    # Obtém a saída da camada convolucional de interesse
+    penultimate_layer_output = base_model.get_layer(target_layer_name).output  
+
+    # Retorna um submodelo funcional
+    return Model(inputs=base_model.input, outputs=penultimate_layer_output)
+
+
+def apply_gradcam_batch(full_model, image_paths, class_index, penultimate_layer_name, batch_size=5, save_path=None):
+    """
+    Aplica Grad-CAM em lotes de imagens e salva ou exibe os resultados.
+
+    Args:
+        full_model: Modelo completo treinado.
+        image_paths: Lista com os caminhos das imagens.
+        class_index: Índice da classe de interesse.
+        penultimate_layer_name: Nome da camada convolucional.
+        batch_size: Número de imagens por lote.
+        save_path: Caminho para salvar a figura (opcional).
+    """
+    # Cria o submodelo funcional
+    submodel = create_submodel_for_gradcam(full_model, penultimate_layer_name)
+
+    # Configura Grad-CAM no submodelo
+    gradcam = Gradcam(submodel, clone=False)
+    score = CategoricalScore([class_index])
+
+    total_images = len(image_paths)
+    total_batches = (total_images + batch_size - 1) // batch_size
+
+    fig, axes = plt.subplots(total_images, 2, figsize=(10, 5 * total_images))
+    axes = np.array(axes).reshape(-1, 2)
+
+    for batch_idx in range(total_batches):
+        batch_start = batch_idx * batch_size
+        batch_end = min(batch_start + batch_size, total_images)
+        batch_paths = image_paths[batch_start:batch_end]
+
+        batch_images = []
+        for img_path in batch_paths:
+            img = load_img(img_path, target_size=(224, 224))
+            img_array = img_to_array(img) / 255.0
+            batch_images.append(img_array)
+
+        batch_images = np.array(batch_images)
+
+        # Calcula o Grad-CAM para o lote atual
+        heatmaps = gradcam(score, batch_images, penultimate_layer=penultimate_layer_name)
+
+        for i, (img_path, heatmap) in enumerate(zip(batch_paths, heatmaps)):
+            img_idx = batch_start + i
+            img = load_img(img_path, target_size=(224, 224))
+
+            axes[img_idx, 0].imshow(img)
+            axes[img_idx, 0].set_title("Input Image")
+            axes[img_idx, 0].axis('off')
+
+            axes[img_idx, 1].imshow(img)
+            axes[img_idx, 1].imshow(heatmap, cmap='jet', alpha=0.5)
+            axes[img_idx, 1].set_title("Grad-CAM Heatmap")
+            axes[img_idx, 1].axis('off')
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Grad-CAMs salvos em: {save_path}")
+    else:
+        plt.show()
+        plt.close()
+
+image_paths = [
+    'dataset/1/2306.png',
+    'dataset/3/1028.png',
+    'dataset/1/2980.png',
+    'dataset/3/1022.png'
+]
+
+apply_gradcam_batch(
+    full_model=model,
+    image_paths=image_paths,
+    class_index=1,  # Classe de interesse
+    penultimate_layer_name='block14_sepconv2_act',
+    batch_size=3,  # Lotes de 3 imagens
+    save_path="gradcam_batch_output.png"  # Salva o resultado como imagem
+)
+
+
 #Evaluete Model
 
 def calculate_custom_batch_size(test_data_length, max_batch_size=80):
@@ -458,44 +554,79 @@ evaluate_model_with_generator(model, train_generator, "Treinamento")
 evaluate_model_with_generator(model, val_generator, "Validação")
 evaluate_model_with_generator(model, test_generator, "Teste (Custom Batch Size)")
 
-def plot_confusion_matrix(cm, classes,
-                          normalize=False,
-                          title='Confusion matrix',
-                          cmap=plt.cm.Blues):
+# def plot_confusion_matrix(cm, classes,
+#                           normalize=False,
+#                           title='Confusion matrix',
+#                           cmap=plt.cm.Blues):
+#     """
+#     This function prints and plots the confusion matrix.
+#     Normalization can be applied by setting `normalize=True`.
+#     """
+#     plt.imshow(cm, interpolation='nearest', cmap=cmap)
+#     plt.title(title)
+#     plt.colorbar()
+#     tick_marks = np.arange(len(classes))
+#     plt.xticks(tick_marks, classes, rotation=45)
+#     plt.yticks(tick_marks, classes)
+
+#     if normalize:
+#         cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+#         print("Normalized confusion matrix")
+#     else:
+#         print('Confusion matrix, without normalization')
+
+#     print(cm)
+
+#     thresh = cm.max() / 2.
+#     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+#         plt.text(j, i, cm[i, j],
+#                  horizontalalignment="center",
+#                  color="white" if cm[i, j] > thresh else "black")
+
+#     plt.tight_layout()
+#     plt.ylabel('True label')
+#     plt.xlabel('Predicted label')
+
+def plot_confusion_matrix(cm, class_names, save_path="confusion_matrix.png"):
     """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
+    Gera e salva a matriz de confusão como uma imagem separada.
+
+    Args:
+        cm: Matriz de confusão já calculada.
+        class_names: Lista com os nomes das classes.
+        save_path: Caminho para salvar a matriz de confusão.
     """
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=45)
-    plt.yticks(tick_marks, classes)
 
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        print("Normalized confusion matrix")
-    else:
-        print('Confusion matrix, without normalization')
-
-    print(cm)
-
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, cm[i, j],
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
-
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, yticklabels=class_names)
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.title("Confusion Matrix")
     plt.tight_layout()
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Matriz de confusão salva em: {save_path}")
 
-
-# Assuming you have your test data and predicted labels
+# Predição dos dados de teste
 Y_pred = model.predict(test_generator)
 y_pred = np.argmax(Y_pred, axis=1)
+
+# Exibição da matriz de confusão
 print('Confusion Matrix')
 cm = confusion_matrix(test_generator.classes, y_pred)
-plot_confusion_matrix(cm, classes=['1', '2', '3'])
-plt.show()
+plot_confusion_matrix(cm, class_names=['1', '2', '3'], save_path="output_confusion_matrix.png")
+
+# Relatorio detalhado do f1-score, precisao e recall
+print("\nClassification Report:")
+report = classification_report(test_generator.classes, y_pred, target_names=['1', '2', '3'])
+print(report)
+
+# Calculo individual das metricas
+f1 = f1_score(test_generator.classes, y_pred, average='weighted')
+precision = precision_score(test_generator.classes, y_pred, average='weighted')
+recall = recall_score(test_generator.classes, y_pred, average='weighted')
+
+print("\nMetrics:")
+print(f"F1-score (Weighted): {f1:.4f}")
+print(f"Precision (Weighted): {precision:.4f}")
+print(f"Recall (Weighted): {recall:.4f}")
