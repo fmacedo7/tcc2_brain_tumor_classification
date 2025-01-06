@@ -1,15 +1,3 @@
-'''
-import tensorflow as tf
-print("TensorFlow version:", tf.__version__)
-
-import keras
-print("Keras version:", keras.__version__)
-
-This is necessary in colab notebook to install the specific versions bellow
-
-!pip uninstall -y tensorflow keras
-!pip install tensorflow==2.11.0 keras==2.11.0
-'''
 # import system libs
 import os
 import time
@@ -17,7 +5,6 @@ import shutil
 import pathlib
 import itertools
 
-# import data handling tools
 import cv2
 import matplotlib
 import numpy as np
@@ -49,20 +36,48 @@ from tf_keras_vis.gradcam import Gradcam
 from tf_keras_vis.utils import normalize
 from tf_keras_vis.utils.scores import CategoricalScore
 from tf_keras_vis.utils.model_modifiers import ReplaceToLinear
-
-# Ignore Warnings
 import warnings
 warnings.filterwarnings("ignore")
 
 print ('modules loaded')
 
-#---------Create a dataframe from dataset----------#
-
 # Diretório onde estão as subpastas
 base_dir = '/home/ubuntu/Documents/tcc2_brain_tumor_classification/dataset'
 
+# # Diretório da classe 1
+# class1_dir = 'dataset/1'
+
+# # Diretório de saída para imagens aumentadas da Classe 1
+# output_dir = 'dataset/1_augmented'
+# os.makedirs(output_dir, exist_ok=True)
+
+# # Configurando o ImageDataGenerator
+# datagen = ImageDataGenerator(
+#     rotation_range=20,
+#     width_shift_range=0.2,
+#     height_shift_range=0.2,
+#     shear_range=0.2,
+#     zoom_range=0.2,
+#     horizontal_flip=True,
+#     fill_mode='nearest'
+# )
+
+# # Aumentar imagens da Classe 1
+# for image_path in os.listdir(class1_dir):
+#     img = load_img(os.path.join(class1_dir, image_path))  # Carregar imagem
+#     img_array = img_to_array(img)  # Converter para array NumPy
+#     img_array = img_array.reshape((1,) + img_array.shape)  # Redimensionar
+
+#     # Gerar até 3 imagens aumentadas para cada imagem original
+#     generated_count = 0
+#     for batch in datagen.flow(img_array, batch_size=1, save_to_dir=output_dir, save_prefix='aug', save_format='jpeg'):
+#         generated_count += 1
+#         if generated_count >= 3:
+#             break
+
+
 # Lista das classes (doenças)
-classes = ['1', '2', '3']
+classes = ['1_augmented', '2', '3']
 
 # Define as proporções de divisão (por exemplo, 80% treino, 10% teste, 10% validação)
 train_ratio = 0.8
@@ -114,8 +129,39 @@ val_images = pd.DataFrame(val_data)
 test_data = {'filepaths': test_filepaths, 'labels': test_labels}
 test_images = pd.DataFrame(test_data)
 
-#Generate Images bellow
+# Diretório da classe 1
+class1_dir = 'dataset/1'
 
+# Diretório de saída para imagens aumentadas da Classe 1
+output_dir = 'dataset/1_augmented'
+os.makedirs(output_dir, exist_ok=True)
+
+# Configurando o ImageDataGenerator
+datagen = ImageDataGenerator(
+    rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+
+# Aumentar imagens da Classe 1
+for image_path in os.listdir(class1_dir):
+    img = load_img(os.path.join(class1_dir, image_path))  # Carregar imagem
+    img_array = img_to_array(img)  # Converter para array NumPy
+    img_array = img_array.reshape((1,) + img_array.shape)  # Redimensionar
+
+    # Gerar até 3 imagens aumentadas para cada imagem original
+    generated_count = 0
+    for batch in datagen.flow(img_array, batch_size=1, save_to_dir=output_dir, save_prefix='aug', save_format='jpeg'):
+        generated_count += 1
+        if generated_count >= 3:
+            break
+
+
+# Pre-processing images
 def create_data_generators(train_images, val_images, test_images, image_size=(112, 112), batch_size=32):
     input_shape = image_size + (3,)
 
@@ -174,8 +220,6 @@ def create_data_generators(train_images, val_images, test_images, image_size=(11
 # Chamar a função com a ordem correta dos parâmetros
 train_generator, val_generator, test_generator = create_data_generators(train_images, val_images, test_images)
 
-#------------- Show some images from data generator -------------#
-
 def show_images_with_labels(generator, num_images=25):
     x, y = next(generator)
     class_labels = list(generator.class_indices.keys())
@@ -185,20 +229,13 @@ def show_images_with_labels(generator, num_images=25):
         plt.subplot(5, 5, i + 1)
         plt.imshow(x[i])
         predicted_label = class_labels[np.argmax(y[i])]
-        plt.title(f"Label: {predicted_label}")
+        plt.title(f"Class: {predicted_label}")
         plt.axis('off')
     plt.tight_layout()
     plt.savefig("output_image.png")
     plt.close()
 
 show_images_with_labels(train_generator)
-'''
-Label 1: Meningioma;
-Label 2: Glioma;
-Label 3: Pituitary Tumor
-'''
-
-#----------- Callbacks ------------#
 
 class CustomCallback(tf.keras.callbacks.Callback):
     def __init__(self, model, patience, stop_patience, accuracy_threshold, learning_rate_factor, batches, epochs, ask_epoch):
@@ -274,15 +311,12 @@ class CustomCallback(tf.keras.callbacks.Callback):
         print(f"Total Training Duration: {total_duration:.2f} seconds")
         print("Training has ended.")
 
-#--------- Training History ---------#
-
 def plot_training_history(history):
     loss = history.history['loss']
     val_loss = history.history['val_loss']
     accuracy = history.history['accuracy']
     val_accuracy = history.history['val_accuracy']
 
-    # Verificando se val_loss e val_accuracy não estão vazios antes de usar index()
     if val_loss and val_accuracy:
         best_epoch = val_loss.index(min(val_loss)) + 1
         best_accuracy_epoch = val_accuracy.index(max(val_accuracy)) + 1
@@ -313,8 +347,7 @@ def plot_training_history(history):
         plt.show()
     else:
         print("Erro: Os dados de validação não estão presentes no histórico.")
-
-#Data reading
+        
 try:
     batch_size = 40
     train_generator, test_generator, val_generator = create_data_generators(train_images, test_images, val_images)
@@ -328,8 +361,7 @@ except FileNotFoundError as fnfe:
 except Exception as e:
     print(f"Erro inesperado: {e}. Detalhes do erro:", type(e).__name__, e)
 
-#--------- Creating Xception Pre-trained Model ------------#
-
+#Creating Xception Pre-trained Model
 img_size = (224, 224)
 channels = 3
 img_shape = (img_size[0], img_size[1], channels)
@@ -354,7 +386,6 @@ model = Sequential([
 # Otimizador com taxa de aprendizado mais agressiva
 opt = keras.optimizers.Adam(learning_rate=1e-4)
 
-# model.compile(Adamax(learning_rate=0.004), loss='categorical_crossentropy', metrics=['accuracy'])
 model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])#
 
 print(base_model.output_shape)
@@ -362,13 +393,12 @@ print(base_model.output_shape)
 model.summary()
 
 #Callbacks Parameters
-
 def on_train_begin(self, logs=None):
     tf.keras.backend.set_value(self.model.optimizer.lr, 1e-4)
     print("Training has started.")
     print(f"Initial Learning rate: {tf.keras.backend.get_value(self.model.optimizer.lr)}")
 
-batch_size = 40
+batch_size = 48 #Optimizing batch for GPU
 epochs = 40
 patience = 1
 stop_patience = 3
@@ -377,7 +407,6 @@ factor = 0.5
 ask_epoch = 5
 batches = int(np.ceil(len(train_generator.labels) / batch_size))
 
-# Custom Callback
 custom_callback = CustomCallback(
     model=model,
     patience=patience,
@@ -389,7 +418,6 @@ custom_callback = CustomCallback(
     accuracy_threshold=threshold
 )
 
-# ReduceLROnPlateau Callback
 reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
     monitor='val_loss',
     factor=0.2,
@@ -499,10 +527,11 @@ def apply_gradcam_batch(full_model, image_paths, class_index, penultimate_layer_
         plt.close()
 
 image_paths = [
-    'dataset/1/2306.png',
-    'dataset/3/1028.png',
-    'dataset/1/2980.png',
-    'dataset/3/1022.png'
+    'dataset/1_augmented/aug_0_3.jpeg',
+    'dataset/1_augmented/aug_0_122.jpeg',
+    'dataset/1/2343.png',
+    'dataset/2/619.png',
+    'dataset/3/993.png'
 ]
 
 apply_gradcam_batch(
@@ -510,12 +539,9 @@ apply_gradcam_batch(
     image_paths=image_paths,
     class_index=1,  # Classe de interesse
     penultimate_layer_name='block14_sepconv2_act',
-    batch_size=3,  # Lotes de 3 imagens
-    save_path="gradcam_batch_output.png"  # Salva o resultado como imagem
+    batch_size=5,  # Lotes de 3 imagens
+    save_path="gradcam_batch_output.png"
 )
-
-
-#Evaluete Model
 
 def calculate_custom_batch_size(test_data_length, max_batch_size=80):
     """
@@ -554,39 +580,6 @@ evaluate_model_with_generator(model, train_generator, "Treinamento")
 evaluate_model_with_generator(model, val_generator, "Validação")
 evaluate_model_with_generator(model, test_generator, "Teste (Custom Batch Size)")
 
-# def plot_confusion_matrix(cm, classes,
-#                           normalize=False,
-#                           title='Confusion matrix',
-#                           cmap=plt.cm.Blues):
-#     """
-#     This function prints and plots the confusion matrix.
-#     Normalization can be applied by setting `normalize=True`.
-#     """
-#     plt.imshow(cm, interpolation='nearest', cmap=cmap)
-#     plt.title(title)
-#     plt.colorbar()
-#     tick_marks = np.arange(len(classes))
-#     plt.xticks(tick_marks, classes, rotation=45)
-#     plt.yticks(tick_marks, classes)
-
-#     if normalize:
-#         cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-#         print("Normalized confusion matrix")
-#     else:
-#         print('Confusion matrix, without normalization')
-
-#     print(cm)
-
-#     thresh = cm.max() / 2.
-#     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-#         plt.text(j, i, cm[i, j],
-#                  horizontalalignment="center",
-#                  color="white" if cm[i, j] > thresh else "black")
-
-#     plt.tight_layout()
-#     plt.ylabel('True label')
-#     plt.xlabel('Predicted label')
-
 def plot_confusion_matrix(cm, class_names, save_path="confusion_matrix.png"):
     """
     Gera e salva a matriz de confusão como uma imagem separada.
@@ -616,17 +609,30 @@ print('Confusion Matrix')
 cm = confusion_matrix(test_generator.classes, y_pred)
 plot_confusion_matrix(cm, class_names=['1', '2', '3'], save_path="output_confusion_matrix.png")
 
-# Relatorio detalhado do f1-score, precisao e recall
-print("\nClassification Report:")
-report = classification_report(test_generator.classes, y_pred, target_names=['1', '2', '3'])
-print(report)
+def calculate_metrics(y_true, y_pred, class_names):
+    """
+    Calcula e exibe métricas de precisão, recall e F1-score.
 
-# Calculo individual das metricas
-f1 = f1_score(test_generator.classes, y_pred, average='weighted')
-precision = precision_score(test_generator.classes, y_pred, average='weighted')
-recall = recall_score(test_generator.classes, y_pred, average='weighted')
+    Args:
+        y_true: Rótulos reais.
+        y_pred: Rótulos preditos pelo modelo.
+        class_names: Lista com os nomes das classes.
+    """
 
-print("\nMetrics:")
-print(f"F1-score (Weighted): {f1:.4f}")
-print(f"Precision (Weighted): {precision:.4f}")
-print(f"Recall (Weighted): {recall:.4f}")
+    # Relatório detalhado por classe
+    print("\nClassification Report:")
+    report = classification_report(y_true, y_pred, target_names=class_names)
+    print(report)
+
+    # Cálculo das métricas globais
+    precision = precision_score(y_true, y_pred, average='weighted')
+    recall = recall_score(y_true, y_pred, average='weighted')
+    f1 = f1_score(y_true, y_pred, average='weighted')
+
+    print("\nGlobal Metrics:")
+    print(f"Precision (Weighted): {precision:.4f}")
+    print(f"Recall (Weighted): {recall:.4f}")
+    print(f"F1-score (Weighted): {f1:.4f}")
+
+# Cálculo de métricas
+calculate_metrics(test_generator.classes, y_pred, class_names=['1', '2', '3'])
