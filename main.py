@@ -77,7 +77,7 @@ base_dir = '/home/ubuntu/Documents/tcc2_brain_tumor_classification/dataset'
 
 
 # Lista das classes (doenças)
-classes = ['1_augmented', '2', '3']
+classes = ['1', '2', '3']
 
 # Define as proporções de divisão (por exemplo, 80% treino, 10% teste, 10% validação)
 train_ratio = 0.8
@@ -128,38 +128,6 @@ val_images = pd.DataFrame(val_data)
 
 test_data = {'filepaths': test_filepaths, 'labels': test_labels}
 test_images = pd.DataFrame(test_data)
-
-# Diretório da classe 1
-class1_dir = 'dataset/1'
-
-# Diretório de saída para imagens aumentadas da Classe 1
-output_dir = 'dataset/1_augmented'
-os.makedirs(output_dir, exist_ok=True)
-
-# Configurando o ImageDataGenerator
-datagen = ImageDataGenerator(
-    rotation_range=20,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    fill_mode='nearest'
-)
-
-# Aumentar imagens da Classe 1
-for image_path in os.listdir(class1_dir):
-    img = load_img(os.path.join(class1_dir, image_path))  # Carregar imagem
-    img_array = img_to_array(img)  # Converter para array NumPy
-    img_array = img_array.reshape((1,) + img_array.shape)  # Redimensionar
-
-    # Gerar até 3 imagens aumentadas para cada imagem original
-    generated_count = 0
-    for batch in datagen.flow(img_array, batch_size=1, save_to_dir=output_dir, save_prefix='aug', save_format='jpeg'):
-        generated_count += 1
-        if generated_count >= 3:
-            break
-
 
 # Pre-processing images
 def create_data_generators(train_images, val_images, test_images, image_size=(112, 112), batch_size=32):
@@ -362,7 +330,7 @@ except Exception as e:
     print(f"Erro inesperado: {e}. Detalhes do erro:", type(e).__name__, e)
 
 #Creating Xception Pre-trained Model
-img_size = (224, 224)
+img_size = (112, 112)
 channels = 3
 img_shape = (img_size[0], img_size[1], channels)
 class_count = len(train_generator.class_indices)
