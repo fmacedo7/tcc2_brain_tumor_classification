@@ -1,10 +1,8 @@
-# import system libs
 import os
 import time
 import shutil
 import pathlib
 import itertools
-
 import cv2
 import matplotlib
 import numpy as np
@@ -15,12 +13,8 @@ sns.set_style('darkgrid')
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report, f1_score, precision_score, recall_score
-
-# import Deep learning Libraries
 import tensorflow as tf
 from tensorflow import keras
-# gpus = tf.config.experimental.list_physical_devices('GPU')
-# tf.config.experimental.set_memory_growth(gpus[0], True)
 from keras.models import Sequential, Model
 from keras.optimizers import Adam, Adamax
 from keras.losses import categorical_crossentropy
@@ -38,48 +32,14 @@ from tf_keras_vis.utils.scores import CategoricalScore
 from tf_keras_vis.utils.model_modifiers import ReplaceToLinear
 import warnings
 warnings.filterwarnings("ignore")
-
 print ('modules loaded')
 
 # Diretório onde estão as subpastas
 base_dir = '/home/ubuntu/Documents/tcc2_brain_tumor_classification/dataset'
 
-# # Diretório da classe 1
-# class1_dir = 'dataset/1'
-
-# # Diretório de saída para imagens aumentadas da Classe 1
-# output_dir = 'dataset/1_augmented'
-# os.makedirs(output_dir, exist_ok=True)
-
-# # Configurando o ImageDataGenerator
-# datagen = ImageDataGenerator(
-#     rotation_range=20,
-#     width_shift_range=0.2,
-#     height_shift_range=0.2,
-#     shear_range=0.2,
-#     zoom_range=0.2,
-#     horizontal_flip=True,
-#     fill_mode='nearest'
-# )
-
-# # Aumentar imagens da Classe 1
-# for image_path in os.listdir(class1_dir):
-#     img = load_img(os.path.join(class1_dir, image_path))  # Carregar imagem
-#     img_array = img_to_array(img)  # Converter para array NumPy
-#     img_array = img_array.reshape((1,) + img_array.shape)  # Redimensionar
-
-#     # Gerar até 3 imagens aumentadas para cada imagem original
-#     generated_count = 0
-#     for batch in datagen.flow(img_array, batch_size=1, save_to_dir=output_dir, save_prefix='aug', save_format='jpeg'):
-#         generated_count += 1
-#         if generated_count >= 3:
-#             break
-
-
 # Lista das classes (doenças)
 classes = ['1', '2', '3']
 
-# Define as proporções de divisão (por exemplo, 80% treino, 10% teste, 10% validação)
 train_ratio = 0.8
 test_ratio = 0.1
 val_ratio = 0.1
@@ -226,7 +186,7 @@ class CustomCallback(tf.keras.callbacks.Callback):
         print(f"Batch size: {self.batches}")
         print(f"Learning rate: {tf.keras.backend.get_value(self.model.optimizer.lr)}")
         if self.model.optimizer:
-            print(f"Learnig rate: {self.model.optimizer.learning_rate.numpy()}")
+            print(f"Learning rate: {self.model.optimizer.learning_rate.numpy()}")
         else:
             print("Warning: Optimizer not yet compiled.")
 
