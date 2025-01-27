@@ -3,6 +3,7 @@ import time
 import shutil
 import pathlib
 import itertools
+import random
 import cv2
 import matplotlib
 import numpy as np
@@ -15,7 +16,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report, f1_score, precision_score, recall_score
 import tensorflow as tf
 from tensorflow import keras
-from keras.models import Sequential, Model
+from keras.models import Sequential, Model, load_model
 from keras.optimizers import Adam, Adamax
 from keras.losses import categorical_crossentropy
 from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Activation, Dropout
@@ -34,10 +35,8 @@ import warnings
 warnings.filterwarnings("ignore")
 print ('modules loaded')
 
-# Diretório onde estão as subpastas
 base_dir = '/home/ubuntu/Documents/tcc2_brain_tumor_classification/dataset'
-
-# Lista das classes (doenças)
+SIZE = 224
 classes = ['1', '2', '3']
 
 train_ratio = 0.8
@@ -59,7 +58,6 @@ for disease in classes:
     source_dir = os.path.join(base_dir, disease)
     images = os.listdir(source_dir)
 
-    # Divide as imagens em treino, teste e validação de forma estratificada
     train, test_val = train_test_split(images, shuffle=True, random_state=123, test_size=(1 - train_ratio), stratify=[disease] * len(images))
     test, val = train_test_split(test_val, shuffle=True, random_state=123, test_size=val_ratio / (test_ratio + val_ratio), stratify=[disease] * len(test_val))
 
@@ -89,8 +87,19 @@ val_images = pd.DataFrame(val_data)
 test_data = {'filepaths': test_filepaths, 'labels': test_labels}
 test_images = pd.DataFrame(test_data)
 
+# def gaussian_noise(image):
+#     if image.max() > 1.0:
+#         image = image / 255.0
+    
+#     noise = np.random.normal(loc=0.0, scale=0.1, size=image.shape)
+#     noise_image = image + noise
+    
+#     noise_image = np.clip(noise_image, 0, 1)
+    
+#     return noise_image
+
 # Pre-processing images
-def create_data_generators(train_images, val_images, test_images, image_size=(112, 112), batch_size=32):
+def create_data_generators(train_images, val_images, test_images, image_size=(SIZE, SIZE), batch_size=16):
     input_shape = image_size + (3,)
 
     train_datagen = ImageDataGenerator(
@@ -101,7 +110,8 @@ def create_data_generators(train_images, val_images, test_images, image_size=(11
         height_shift_range=0.2,
         shear_range=0.2,
         zoom_range=0.2,
-        fill_mode='nearest'
+        fill_mode='nearest',
+        # preprocessing_function=gaussian_noise,
     )
 
     train_generator = train_datagen.flow_from_dataframe(
@@ -142,10 +152,9 @@ def create_data_generators(train_images, val_images, test_images, image_size=(11
         batch_size=test_batch_size,
         shuffle=False,
     )
-
+    
     return train_generator, val_generator, test_generator
 
-# Chamar a função com a ordem correta dos parâmetros
 train_generator, val_generator, test_generator = create_data_generators(train_images, val_images, test_images)
 
 def show_images_with_labels(generator, num_images=25):
@@ -277,7 +286,7 @@ def plot_training_history(history):
         print("Erro: Os dados de validação não estão presentes no histórico.")
         
 try:
-    batch_size = 40
+    batch_size = 70
     train_generator, test_generator, val_generator = create_data_generators(train_images, test_images, val_images)
     print("Data generators criados com sucesso.")
 except NameError as ne:
@@ -289,11 +298,13 @@ except FileNotFoundError as fnfe:
 except Exception as e:
     print(f"Erro inesperado: {e}. Detalhes do erro:", type(e).__name__, e)
 
-#Creating Xception Pre-trained Model
-img_size = (112, 112)
+# load_trained_model = load_model("outputs/model_save/modelo_treinado.h5")
+# print('Modelo carregado com sucesso!')
+
+img_size = (SIZE, SIZE)
 channels = 3
 img_shape = (img_size[0], img_size[1], channels)
-class_count = len(train_generator.class_indices)
+class_count = len(list(train_generator.class_indices.keys()))
 
 base_model = tf.keras.applications.Xception(
     include_top=False,
@@ -311,10 +322,8 @@ model = Sequential([
     Dense(class_count, activation='softmax')
 ])
 
-# Otimizador com taxa de aprendizado mais agressiva
-opt = keras.optimizers.Adam(learning_rate=1e-4)
-
-model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])#
+opt = keras.optimizers.Adamax(learning_rate=1e-4)
+model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
 
 print(base_model.output_shape)
 
@@ -356,7 +365,6 @@ reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
 
 callbacks = [custom_callback, reduce_lr]
 
-#Training Models
 history = model.fit(
     x=train_generator,
     epochs=epochs,
@@ -368,9 +376,9 @@ history = model.fit(
 )
 
 def find_penultimate_layer(model):
-    """
-    Retorna o nome da última camada convolucional no modelo.
-    """
+    for layer in model.layers:
+        if 'conv' in layer.name or isinstance(layer, tf.keras.layers.Conv2D):
+            print(layer.name, layer.output_shape)
     for layer in reversed(model.layers):
         if 'conv' in layer.name or 'Conv2D' in str(layer):
             print(f"Penultimate Conv Layer: {layer.name}")
@@ -378,35 +386,15 @@ def find_penultimate_layer(model):
     raise ValueError("Nenhuma camada convolucional encontrada no modelo base.")
 
 def create_submodel_for_gradcam(full_model, target_layer_name):
-    """
-    Cria um submodelo funcional conectando as entradas da Xception à camada convolucional alvo.
-    """
-    # Acessa o base_model (Xception)
-    base_model = full_model.layers[0]  
+    base_model = full_model.layers[0]
 
-    # Obtém a saída da camada convolucional de interesse
-    penultimate_layer_output = base_model.get_layer(target_layer_name).output  
+    penultimate_layer_output = base_model.get_layer(target_layer_name).output
 
-    # Retorna um submodelo funcional
     return Model(inputs=base_model.input, outputs=penultimate_layer_output)
 
-
 def apply_gradcam_batch(full_model, image_paths, class_index, penultimate_layer_name, batch_size=5, save_path=None):
-    """
-    Aplica Grad-CAM em lotes de imagens e salva ou exibe os resultados.
-
-    Args:
-        full_model: Modelo completo treinado.
-        image_paths: Lista com os caminhos das imagens.
-        class_index: Índice da classe de interesse.
-        penultimate_layer_name: Nome da camada convolucional.
-        batch_size: Número de imagens por lote.
-        save_path: Caminho para salvar a figura (opcional).
-    """
-    # Cria o submodelo funcional
     submodel = create_submodel_for_gradcam(full_model, penultimate_layer_name)
 
-    # Configura Grad-CAM no submodelo
     gradcam = Gradcam(submodel, clone=False)
     score = CategoricalScore([class_index])
 
@@ -423,18 +411,17 @@ def apply_gradcam_batch(full_model, image_paths, class_index, penultimate_layer_
 
         batch_images = []
         for img_path in batch_paths:
-            img = load_img(img_path, target_size=(224, 224))
+            img = load_img(img_path, target_size=(SIZE, SIZE))
             img_array = img_to_array(img) / 255.0
             batch_images.append(img_array)
 
         batch_images = np.array(batch_images)
-
-        # Calcula o Grad-CAM para o lote atual
+        
         heatmaps = gradcam(score, batch_images, penultimate_layer=penultimate_layer_name)
 
         for i, (img_path, heatmap) in enumerate(zip(batch_paths, heatmaps)):
             img_idx = batch_start + i
-            img = load_img(img_path, target_size=(224, 224))
+            img = load_img(img_path, target_size=(SIZE, SIZE))
 
             axes[img_idx, 0].imshow(img)
             axes[img_idx, 0].set_title("Input Image")
@@ -455,11 +442,7 @@ def apply_gradcam_batch(full_model, image_paths, class_index, penultimate_layer_
         plt.close()
 
 image_paths = [
-    'dataset/1_augmented/aug_0_3.jpeg',
-    'dataset/1_augmented/aug_0_122.jpeg',
-    'dataset/1/2343.png',
-    'dataset/2/619.png',
-    'dataset/3/993.png'
+    'dataset/1/2935.png',
 ]
 
 apply_gradcam_batch(
@@ -472,16 +455,6 @@ apply_gradcam_batch(
 )
 
 def calculate_custom_batch_size(test_data_length, max_batch_size=80):
-    """
-    Calcula o tamanho de lote personalizado com base no comprimento dos dados de teste.
-
-    Args:
-    - test_data_length (int): Comprimento dos dados de teste.
-    - max_batch_size (int, opcional): Tamanho máximo do lote. Padrão é 80.
-
-    Returns:
-    - custom_batch_size (int): Tamanho do lote personalizado calculado.
-    """
     for divisor in range(1, test_data_length + 1):
         if test_data_length % divisor == 0 and test_data_length // divisor <= max_batch_size:
             return test_data_length // divisor
@@ -489,35 +462,16 @@ def calculate_custom_batch_size(test_data_length, max_batch_size=80):
     return 1  # Valor de fallback, caso nenhum divisor adequado seja encontrado
 
 def evaluate_model_with_generator(model, data_generator, name):
-    """
-    Avalia o modelo usando um gerador de dados e imprime a perda e a precisão.
-
-    Args:
-    - model (keras.Model): O modelo Keras a ser avaliado.
-    - data_generator (keras.preprocessing.image.ImageDataGenerator): O gerador de dados.
-    - name (str): O nome do conjunto de dados sendo avaliado (para exibição).
-    """
     loss, accuracy = model.evaluate(data_generator, verbose=0)
     print(f"{name} - Loss: {loss:.4f} - Accuracy: {accuracy:.4f}")
 
-# Calcular o tamanho de lote personalizado com base no número de imagens de teste
 custom_batch_size = calculate_custom_batch_size(len(test_images))
 
-# Avaliar o modelo nos conjuntos de treinamento, validação e teste
 evaluate_model_with_generator(model, train_generator, "Treinamento")
 evaluate_model_with_generator(model, val_generator, "Validação")
 evaluate_model_with_generator(model, test_generator, "Teste (Custom Batch Size)")
 
 def plot_confusion_matrix(cm, class_names, save_path="confusion_matrix.png"):
-    """
-    Gera e salva a matriz de confusão como uma imagem separada.
-
-    Args:
-        cm: Matriz de confusão já calculada.
-        class_names: Lista com os nomes das classes.
-        save_path: Caminho para salvar a matriz de confusão.
-    """
-
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, yticklabels=class_names)
     plt.xlabel("Predicted")
@@ -528,31 +482,18 @@ def plot_confusion_matrix(cm, class_names, save_path="confusion_matrix.png"):
     plt.close()
     print(f"Matriz de confusão salva em: {save_path}")
 
-# Predição dos dados de teste
 Y_pred = model.predict(test_generator)
 y_pred = np.argmax(Y_pred, axis=1)
 
-# Exibição da matriz de confusão
 print('Confusion Matrix')
 cm = confusion_matrix(test_generator.classes, y_pred)
 plot_confusion_matrix(cm, class_names=['1', '2', '3'], save_path="output_confusion_matrix.png")
 
 def calculate_metrics(y_true, y_pred, class_names):
-    """
-    Calcula e exibe métricas de precisão, recall e F1-score.
-
-    Args:
-        y_true: Rótulos reais.
-        y_pred: Rótulos preditos pelo modelo.
-        class_names: Lista com os nomes das classes.
-    """
-
-    # Relatório detalhado por classe
     print("\nClassification Report:")
     report = classification_report(y_true, y_pred, target_names=class_names)
     print(report)
 
-    # Cálculo das métricas globais
     precision = precision_score(y_true, y_pred, average='weighted')
     recall = recall_score(y_true, y_pred, average='weighted')
     f1 = f1_score(y_true, y_pred, average='weighted')
@@ -562,5 +503,7 @@ def calculate_metrics(y_true, y_pred, class_names):
     print(f"Recall (Weighted): {recall:.4f}")
     print(f"F1-score (Weighted): {f1:.4f}")
 
-# Cálculo de métricas
 calculate_metrics(test_generator.classes, y_pred, class_names=['1', '2', '3'])
+
+# model.save("outputs/model_save/modelo_treinado.h5")
+# print("O modelo foi salvo")
